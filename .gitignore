@@ -1,0 +1,14 @@
+.Rhistory
+.RData
+.Rproj.user/
+.quarto/
+_freeze/
+
+# Exclude intermediate model files
+results/checkpoints/
+results/adjacency/
+
+# Exclude saved R objects
+results/project_results.rds
+/.quarto/
+.positai
