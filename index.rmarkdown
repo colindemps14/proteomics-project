@@ -1,0 +1,225 @@
+---
+title: "How Sensitive Are Estimated Protein Networks?"
+subtitle: "Brain tissue proteomics and the consequences of analysis choices"
+author: "Colin Dempsey"
+
+format:
+  html:
+    toc: true
+    code-fold: true
+    code-summary: "Show R code"
+
+execute:
+  echo: false
+  warning: false
+  message: false
+---
+
+
+
+## Research question
+
+How do the conditional independence testing pipeline and significance level affect the connections and highly connected proteins in an estimated protein network?
+
+This project extends a collaborative summer poster by **Allison Burnett and Colin Dempsey**, supervised by **Dr. Daniel Malinsky** at SIBDS at Columbia. The summer scripts provide the starting network estimators. The class project adds reproducible comparisons of network size, protein degree, and shared connections, presented in a Quarto website.
+
+
+
+```{r}
+#| label: setup
+#| include: false
+if (!requireNamespace("ggplot2", quietly = TRUE) || !requireNamespace("knitr", quietly = TRUE)) {
+  stop("Run source('setup.R') first.")
+}
+library(ggplot2)
+theme_set(theme_minimal(base_size = 12))
+source("analysis.R", local = TRUE)
+r <- project_results
+settings <- r$settings
+summary_table <- r$summary
+degree_matrix <- r$degrees
+selected <- r$selected
+overlap <- r$jaccard
+alphas <- r$config$alphas
+palette <- c("Fisher z" = "#D55E00", "Pearson + WGCM" = "#0072B2")
+```
+
+
+
+## Data and preparation
+
+The dataset attributed to Wang et al. (2016) contains protein measurements from brain tissue. According to the original poster, the samples are from 59 individuals with mild to moderate dementia, with 192 protein variables measured in the dorsolateral prefrontal cortex. The spreadsheet uses identifiers such as Pro1 rather than biological protein names.
+
+
+
+```{r}
+#| label: data-summary
+knitr::kable(r$data_summary)
+```
+
+
+
+The sample ID column is excluded from modeling. All protein measurements are numeric and finite, and no protein column is constant. Protein columns are centered and scaled before fitting. Standardization does not make the variables Gaussian. The dataset contains 11,328 measurements, exceeding the assignment's minimum of 400.
+
+## Statistical methods
+
+The PC algorithm estimates a network by examining statistical relationships between variables. It begins by assuming that every protein is connected to every other protein. It then tests whether pairs of proteins appear independent, sometimes after accounting for other proteins. When the evidence is insufficient to reject independence, the algorithm removes the connection.
+
+We compare two approaches to these tests: Fisher's z-test and a combination of Pearson correlation and the Weighted Generalized Covariance Measure (WGCM). Each approach is evaluated at three significance levels: 0.01, 0.05, and 0.10, producing six estimated networks.
+
+| Pipeline | No conditioning variables | With conditioning variables |
+|---|---|---|
+| Fisher z | Fisher's z-test | Fisher's z-test of partial correlation |
+| Pearson + WGCM | Pearson correlation test | WGCM.fix, GAM regression, seven sign weight functions per conditioning variable plus the constant weight |
+
+**The second pipeline preserves the summer code's Pearson first step.** The PC algorithm estimates a network by examining statistical relationships between variables. It begins by assuming that every protein is connected to every other protein. It then tests whether pairs of proteins appear independent, sometimes after accounting for other proteins. When the evidence is insufficient to reject independence, the algorithm removes the connection.
+
+We compare two approaches to these tests: Fisher's z-test and a combination of Pearson correlation and the Weighted Generalized Covariance Measure (WGCM). Each approach is evaluated at three significance levels: 0.01, 0.05, and 0.10, producing six estimated networks.
+
+A larger alpha generally makes it harder to remove connections. These repeated tests form a graph estimation procedure; alpha is not the whole network's false discovery rate. PC-stable is used to reduce dependence of the estimated skeleton on variable ordering. Each fit starts with seed 15 and uses the same protein order. WGCM uses 499 simulations for its simulated p-values.
+
+The maximum conditioning set size is `r r$config$max_conditioning` in both pipelines, equal to the sample size minus four. This is a numerical upper bound for Fisher's z-test, not a guarantee that high-dimensional regressions are reliable. With 59 samples, large conditioning sets remain problematic.
+
+For causal interpretation, PC relies on causal Markov, faithfulness, acyclicity, no unmeasured confounding, and suitable conditional independence tests. These assumptions are not verified here. We compare **undirected connections**: a retained edge does not establish a biological interaction or a causal direction.
+
+
+
+```{r}
+#| label: warning-review
+if (nrow(r$model_warnings)) {
+  cat("Model warnings were recorded. Review these before interpreting the figures.\n\n")
+  print(knitr::kable(r$model_warnings))
+} else {
+  cat("No model warnings were recorded during these fits.")
+}
+```
+
+
+
+## How does network size change?
+
+Degree is the number of connections a protein has. Density is the proportion of all possible undirected connections that are retained. Each connection is counted once, regardless of its orientation in the estimated PC graph.
+
+
+
+```{r}
+#| label: network-summary
+knitr::kable(summary_table[, c("Method", "Alpha", "Edges", "Density",
+                              "Connected_proteins", "Average_degree", "Maximum_degree")],
+             digits = 4, row.names = FALSE)
+```
+
+```{r}
+#| label: fig-edge-counts
+#| fig-cap: "Retained undirected connections by testing pipeline and alpha."
+p_edges <- ggplot(summary_table,
+                  aes(factor(Alpha, levels = alphas), Edges, fill = Method)) +
+  geom_col(position = position_dodge(width = 0.75), width = 0.65) +
+  geom_text(aes(label = Edges), position = position_dodge(width = 0.75), vjust = -0.4) +
+  scale_fill_manual(values = palette) +
+  scale_y_continuous(expand = expansion(mult = c(0, 0.15))) +
+  labs(x = "Significance level (alpha)", y = "Undirected connections", fill = "Pipeline",
+       title = "How many connections survive each setting?") +
+  theme(legend.position = "bottom")
+print(p_edges)
+dir.create("results/figures", recursive = TRUE, showWarnings = FALSE)
+ggsave("results/figures/edge_counts.png", p_edges, width = 8, height = 5, dpi = 200)
+```
+
+
+
+Across the six configurations, the estimated networks retain between `r min(summary_table$Edges)` and `r max(summary_table$Edges)` connections. Differences in density show sensitivity to the analysis configuration; they do not identify the most accurate network.
+
+## Do the same proteins remain highly connected?
+
+The heatmap displays the union of the five highest-degree proteins in each configuration, including ties at the cutoff and excluding proteins with degree zero. The same proteins are displayed for every configuration. Selection here is descriptive and does not test biological importance.
+
+In the heatmaps, **F** denotes Fisher z and **W** denotes Pearson + WGCM; the number is alpha.
+
+
+
+```{r}
+#| label: fig-protein-degrees
+#| fig-height: !expr max(4, 0.23 * length(selected) + 1.5)
+#| fig-cap: "Degree of selected highly connected proteins across all six configurations."
+if (length(selected)) {
+  plot_data <- expand.grid(Protein = selected, Setting = settings$Setting,
+                           stringsAsFactors = FALSE)
+  plot_data$Degree <- as.vector(degree_matrix[selected, , drop = FALSE])
+  plot_data$Protein <- factor(plot_data$Protein, levels = rev(selected))
+  plot_data$Setting <- factor(plot_data$Setting, levels = settings$Setting,
+                              labels = settings$Short)
+  p_degrees <- ggplot(plot_data, aes(Setting, Protein, fill = Degree)) +
+    geom_tile(color = "white") + geom_text(aes(label = Degree), size = 3) +
+    scale_fill_gradient(low = "#F2F5F7", high = "#74B7C5") +
+    labs(x = "Pipeline and alpha", y = NULL, title = "Which proteins remain highly connected?")
+  print(p_degrees)
+  ggsave("results/figures/protein_degrees.png", p_degrees, width = 8,
+          height = max(4, 0.23 * length(selected) + 1.5), dpi = 200, limitsize = FALSE)
+} else {
+  plot.new(); text(0.5, 0.5, "No connections retained at any setting.")
+}
+```
+
+
+
+The complete degree and rank table, including all proteins, is saved as `results/protein_degrees.csv`. Rank uses ties rather than arbitrarily assigning different ranks to proteins with equal degree.
+
+## How many connections are shared?
+
+Jaccard similarity is the number of shared connections divided by the number present in either network. A value of 1 means identical edge sets; 0 means no shared connections when at least one network is nonempty. For two empty networks, similarity is marked undefined.
+
+
+
+```{r}
+#| label: fig-network-overlap
+#| fig-height: 6
+#| fig-cap: "Jaccard similarity of undirected edge sets. F = Fisher z; W = Pearson + WGCM."
+overlap_data <- expand.grid(First = settings$Short, Second = settings$Short,
+                            stringsAsFactors = FALSE)
+overlap_data$First <- factor(overlap_data$First, levels = settings$Short)
+overlap_data$Second <- factor(overlap_data$Second, levels = rev(settings$Short))
+overlap_data$Jaccard <- as.vector(overlap)
+overlap_data$Label <- ifelse(is.na(overlap_data$Jaccard), "Undefined",
+                              sprintf("%.2f", overlap_data$Jaccard))
+p_overlap <- ggplot(overlap_data, aes(First, Second, fill = Jaccard)) +
+  geom_tile(color = "white") + geom_text(aes(label = Label), size = 3) +
+  scale_fill_gradient(low = "#F2F5F7", high = "#74B7C5", limits = c(0, 1), na.value = "grey85") +
+  coord_equal() + labs(x = NULL, y = NULL, title = "How similar are the edge sets?") +
+  theme(legend.position = "bottom")
+print(p_overlap)
+ggsave("results/figures/jaccard_similarity.png", p_overlap, width = 7, height = 6, dpi = 200)
+```
+
+
+
+To compare pipelines without changing alpha, the next table counts connections shared by both and those retained only by one pipeline.
+
+
+
+```{r}
+#| label: same-alpha-comparison
+knitr::kable(r$same_alpha, digits = 3, row.names = FALSE)
+```
+
+
+
+## Interpretation and limitations
+The results demonstrate substantial sensitivity of estimated protein networks to both the conditional independence testing pipeline and significance level. Across both pipelines, the number of retained connections increased as alpha increased. However, Fisher z consistently produced denser networks than Pearson + WGCM. At alpha = 0.10, Fisher z retained 154 connections, compared with 63 for Pearson + WGCM. The difference was especially pronounced at alpha = 0.01, when the respective networks contained 94 and 1 connection.
+
+The Jaccard similarities further demonstrate differences in the estimated edge sets. Within the Fisher z pipeline, similarity ranged from approximately 0.49 to 0.67 across significance levels. Within Pearson + WGCM, similarity ranged from approximately 0.016 to 0.25. Comparisons between pipelines at matching significance levels also showed relatively low similarity, with Jaccard values of approximately 0.011, 0.108, and 0.247 at alpha values of 0.01, 0.05, and 0.10, respectively. The same-alpha comparison showed that most connections were unique to one pipeline.
+
+The identities of the most highly connected proteins also varied across configurations. Although some proteins, including Pro123, Pro62, Pro159, and Pro82, appeared among the highest-degree proteins in multiple configurations, no single protein consistently dominated all six networks. This suggests that identifying highly connected proteins is also sensitive to analytical choices.
+
+Together, these findings suggest that conclusions about protein connectivity can depend considerably on the selected testing pipeline and significance level. Neither pipeline can be considered more accurate based on these comparisons alone, since the true underlying network is unknown.
+
+## References and attribution
+
+- Wang, T., et al. (2016). FastGGM: An Efficient Algorithm for the Inference of Gaussian Graphical Model in Biological Networks. *PLOS Computational Biology*, 12(2), e1004755. <https://doi.org/10.1371/journal.pcbi.1004755>
+- Kalisch, M., et al. (2012). Causal Inference Using Graphical Models with the R Package pcalg. *Journal of Statistical Software*, 47(11), 1–26. <https://doi.org/10.18637/jss.v047.i11>
+- Scheidegger, C., Hörrmann, J., & Bühlmann, P. (2022). The Weighted Generalised Covariance Measure. *Journal of Machine Learning Research*, 23(273), 1–68. <https://www.jmlr.org/papers/v23/21-1328.html>
+- Software documentation: [pcalg](https://cran.r-universe.dev/pcalg/doc/manual.html) and [weightedGCM](https://cyrillsch.r-universe.dev/weightedGCM/doc/manual.html).
+- Starting scripts: `weightedGCM_test_colin.R`, `weightedGCMtest_allie.R`, and `pc_automated_colin.R`, from summer work by Colin Dempsey and Allison Burnett. All six supplied summer scripts are preserved unchanged under `reference_scripts/` for provenance and are not run by this report.
+
+
+

@@ -1,7 +1,19 @@
+
 ---
 title: "How Sensitive Are Estimated Protein Networks?"
 subtitle: "Brain tissue proteomics and the consequences of analysis choices"
 author: "Colin Dempsey"
+
+format:
+  html:
+    toc: true
+    code-fold: true
+    code-summary: "Show R code"
+
+execute:
+  echo: false
+  warning: false
+  message: false
 ---
 
 ## Research question
@@ -42,18 +54,18 @@ The sample ID column is excluded from modeling. All protein measurements are num
 
 ## Statistical methods
 
-The PC algorithm starts with a fully connected graph. It tests pairs of proteins, first without adjustment and then conditional on other proteins. When the test does not reject independence, the algorithm removes the corresponding connection. It then uses conditional independence information to orient some connections.
+The PC algorithm estimates a network by examining statistical relationships between variables. It begins by assuming that every protein is connected to every other protein. It then tests whether pairs of proteins appear independent, sometimes after accounting for other proteins. When the evidence is insufficient to reject independence, the algorithm removes the connection.
 
-The comparison uses six configurations: two testing pipelines at alpha values of 0.01, 0.05, and 0.10.
+We compare two approaches to these tests: Fisher's z-test and a combination of Pearson correlation and the Weighted Generalized Covariance Measure (WGCM). Each approach is evaluated at three significance levels: 0.01, 0.05, and 0.10, producing six estimated networks.
 
 | Pipeline | No conditioning variables | With conditioning variables |
 |---|---|---|
 | Fisher z | Fisher's z-test | Fisher's z-test of partial correlation |
 | Pearson + WGCM | Pearson correlation test | WGCM.fix, GAM regression, seven sign weight functions per conditioning variable plus the constant weight |
 
-**The second pipeline preserves the summer code's Pearson first step.** It is not WGCM at every step: an uncorrelated nonlinear relationship could be removed before a conditional WGCM test is reached. Consequently, these results compare the two complete pipelines and do not isolate the performance of WGCM alone.
+**The second pipeline preserves the summer code's Pearson first step.** The PC algorithm estimates a network by examining statistical relationships between variables. It begins by assuming that every protein is connected to every other protein. It then tests whether pairs of proteins appear independent, sometimes after accounting for other proteins. When the evidence is insufficient to reject independence, the algorithm removes the connection.
 
-For the Gaussian pipeline, zero partial correlation is interpreted as conditional independence under appropriate distributional assumptions, such as joint Gaussianity. WGCM uses weighted residual relationships after regression on the conditioning variables. It can detect some relationships missed by partial correlation, but greater edge counts or higher accuracy are not guaranteed.
+We compare two approaches to these tests: Fisher's z-test and a combination of Pearson correlation and the Weighted Generalized Covariance Measure (WGCM). Each approach is evaluated at three significance levels: 0.01, 0.05, and 0.10, producing six estimated networks.
 
 A larger alpha generally makes it harder to remove connections. These repeated tests form a graph estimation procedure; alpha is not the whole network's false discovery rate. PC-stable is used to reduce dependence of the estimated skeleton on variable ordering. Each fit starts with seed 15 and uses the same protein order. WGCM uses 499 simulations for its simulated p-values.
 
@@ -180,11 +192,4 @@ Together, these findings suggest that conclusions about protein connectivity can
 - Software documentation: [pcalg](https://cran.r-universe.dev/pcalg/doc/manual.html) and [weightedGCM](https://cyrillsch.r-universe.dev/weightedGCM/doc/manual.html).
 - Starting scripts: `weightedGCM_test_colin.R`, `weightedGCMtest_allie.R`, and `pc_automated_colin.R`, from summer work by Colin Dempsey and Allison Burnett. All six supplied summer scripts are preserved unchanged under `reference_scripts/` for provenance and are not run by this report.
 
-## Computing environment
 
-Saved fits are reused only when the input file, analysis code, settings, package versions, and R version match. Original fitting times and model warnings are saved with each fit. Rendering therefore reloads existing valid fits instead of repeating them.
-
-```{r}
-#| label: session-info
-sessionInfo()
-```
